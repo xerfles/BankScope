@@ -21,37 +21,40 @@ BANKA_VERI = {
 @st.cache_data(ttl=3600)
 def get_intelligence_data():
     data = []
-    usd_ticker = yf.Ticker("TRY=X")
-    kur_data = usd_ticker.history(period="1d")
-    kur = float(kur_data['Close'].iloc[-1])
+    try:
+        usd_ticker = yf.Ticker("TRY=X")
+        kur_data = usd_ticker.history(period="1d")
+        kur = float(kur_data['Close'].iloc[-1])
+    except:
+        kur = 32.50
     
     for name, info in BANKA_VERI.items():
-        t = yf.Ticker(info['ticker'])
-        h = t.history(period="1y")
-        if h.empty: continue
-        
-        fiyat = float(h['Close'].iloc[-1])
-        # Rasyo Hesaplama
-        lot_miktari = {"Akbank": 5.2, "Garanti": 4.2, "İş Bankası": 10.0, "Yapı Kredi": 8.4, "Vakıfbank": 9.9, "Halkbank": 5.0}
-        m_cap_tl = fiyat * lot_miktari[name] * 1e9
-        pb = m_cap_tl / info['ozsermaye']
-        roe = (info['kar'] / info['ozsermaye']) * 100
+        try:
+            t = yf.Ticker(info['ticker'])
+            h = t.history(period="5d")
+            if h.empty: continue
+            
+            fiyat = float(h['Close'].iloc[-1])
+            lot_miktari = {"Akbank": 5.2, "Garanti": 4.2, "İş Bankası": 10.0, "Yapı Kredi": 8.4, "Vakıfbank": 9.9, "Halkbank": 5.0}
+            m_cap_tl = fiyat * lot_miktari[name] * 1e9
+            pb = m_cap_tl / info['ozsermaye']
+            roe = (info['kar'] / info['ozsermaye']) * 100
 
-        # SINYAL ALGORITMASI
-        if roe > 40 and pb < 1.0: sinyal = "💎 Ucuz ve Karlı (Fırsat)"
-        elif roe < 20 and pb > 1.2: sinyal = "⚠️ Pahalı ve Düşük Karlı"
-        else: sinyal = "⚖️ Dengeli Değerleme"
+            if roe > 40 and pb < 1.0: sinyal = "💎 Ucuz ve Karlı (Fırsat)"
+            elif roe < 20 and pb > 1.2: sinyal = "⚠️ Pahalı ve Düşük Karlı"
+            else: sinyal = "⚖️ Dengeli Değerleme"
 
-        data.append({
-            "Banka": name,
-            "Grup": info['grup'],
-            "Fiyat (TL)": fiyat,
-            "Piyasa Değeri ($ B)": (m_cap_tl / kur) / 1e9,
-            "PD/DD": pb,
-            "ROE (%)": roe,
-            "Beta (Risk Skoru)": info['beta'],
-            "Yapay Zeka Sinyali": sinyal
-        })
+            data.append({
+                "Banka": name,
+                "Grup": info['grup'],
+                "Fiyat (TL)": fiyat,
+                "Piyasa Değeri ($ B)": (m_cap_tl / kur) / 1e9,
+                "PD/DD": pb,
+                "ROE (%)": roe,
+                "Beta (Risk Skoru)": info['beta'],
+                "Yapay Zeka Sinyali": sinyal
+            })
+        except: continue
     return pd.DataFrame(data), kur
 
 df, guncel_kur = get_intelligence_data()
@@ -64,14 +67,24 @@ with c1:
     st.plotly_chart(fig, use_container_width=True)
 
 with c2:
-    st.subheader("📰 Bankacılık KAP Akışı (Haberler)")
-    # Dinamik Haber Çekme (Ticker bazlı)
-    target_news = st.selectbox("Haberlerini görmek istediğiniz banka:", list(BANKA_VERI.keys()))
+    st.subheader("📰 Bankacılık Haber Akışı")
+    target_news = st.selectbox("Banka Seçin:", list(BANKA_VERI.keys()))
     news_ticker = yf.Ticker(BANKA_VERI[target_news]["ticker"])
-    for n in news_ticker.news[:5]:
-        st.markdown(f"**[{n['publisher']}]** - [{n['title']}]({n['link']})")
+    
+    # HATAYI ÇÖZEN KISIM: .get() kullanarak güvenli veri çekme
+    try:
+        news_items = news_ticker.news[:5]
+        if not news_items:
+            st.write("Bu banka için güncel haber bulunamadı.")
+        for n in news_items:
+            title = n.get('title', 'Başlıksız Haber')
+            publisher = n.get('publisher', 'Bilinmeyen Kaynak')
+            link = n.get('link', '#')
+            st.markdown(f"**[{publisher}]** - [{title}]({link})")
+    except:
+        st.write("Haberler şu an yüklenemiyor.")
 
-# --- SINYAL TABLOSU (HATASIZ) ---
+# --- SINYAL TABLOSU ---
 st.divider()
 st.subheader("🤖 Algoritmik Analiz Çıktıları")
 
@@ -80,12 +93,9 @@ def color_signals(val):
     if "⚠️" in val: return 'background-color: #4d0000; color: white;'
     return ''
 
-# applymap yerine map kullanıldı (Hatayı çözen kısım burası kanka)
 st.dataframe(df.style.format({
     "Fiyat (TL)": "{:.2f}",
     "Piyasa Değeri ($ B)": "{:.2f}",
     "PD/DD": "{:.2f}",
     "ROE (%)": "{:.1f}%"
-}).map(color_signals, subset=['Yapay Zeka Sinyali']), use_container_width=True, height=350)
-
-st.info("**🕵️ Müfettiş Notu:** Sinyal odası, bankaların sermaye yeterliliği ve karlılık anomalilerini anlık tarar. Haber akışı ise temel analizi destekleyen olay tabanlı (event-based) riskleri takip etmenizi sağlar.")
+}).map(color_signals, subset=['Yapay Zeka Sinyali']), use_container_width=True)
