@@ -4,91 +4,99 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="BankScope Pro+", layout="wide")
+st.set_page_config(page_title="BankScope Intelligence", layout="wide")
 
-st.title("🏛️ BankScope Pro+: İleri Düzey Bankacılık Terminali")
+st.title("🏛️ BankScope Intelligence: Stratejik Karar Destek Sistemi")
 
-# Veri tabanımızı biraz daha genişletelim (Temettü verimi tahmini ekledik)
-BANKA_BILGILERI = {
-    "Akbank": {"ticker": "AKBNK.IS", "grup": "Özel", "ozsermaye": 220e9, "ana_kar": 66e9, "temettü": 5.5},
-    "Garanti": {"ticker": "GARAN.IS", "grup": "Özel", "ozsermaye": 240e9, "ana_kar": 87e9, "temettü": 6.2},
-    "İş Bankası": {"ticker": "ISCTR.IS", "grup": "Özel", "ozsermaye": 270e9, "ana_kar": 72e9, "temettü": 4.8},
-    "Yapı Kredi": {"ticker": "YKBNK.IS", "grup": "Özel", "ozsermaye": 200e9, "ana_kar": 68e9, "temettü": 5.0},
-    "Vakıfbank": {"ticker": "VAKBN.IS", "grup": "Kamu", "ozsermaye": 180e9, "ana_kar": 25e9, "temettü": 1.5},
-    "Halkbank": {"ticker": "HALKB.IS", "grup": "Kamu", "ozsermaye": 160e9, "ana_kar": 10e9, "temettü": 1.0}
+# Temel Veri Bankası (Geliştirilmiş)
+BANKA_VERI = {
+    "Akbank": {"ticker": "AKBNK.IS", "grup": "Özel", "ozsermaye": 220e9, "kar": 66e9, "beta": 1.15},
+    "Garanti": {"ticker": "GARAN.IS", "grup": "Özel", "ozsermaye": 240e9, "kar": 87e9, "beta": 1.10},
+    "İş Bankası": {"ticker": "ISCTR.IS", "grup": "Özel", "ozsermaye": 270e9, "kar": 72e9, "beta": 1.20},
+    "Yapı Kredi": {"ticker": "YKBNK.IS", "grup": "Özel", "ozsermaye": 200e9, "kar": 68e9, "beta": 1.18},
+    "Vakıfbank": {"ticker": "VAKBN.IS", "grup": "Kamu", "ozsermaye": 180e9, "kar": 25e9, "beta": 0.95},
+    "Halkbank": {"ticker": "HALKB.IS", "grup": "Kamu", "ozsermaye": 160e9, "kar": 10e9, "beta": 0.90}
 }
 
-# --- SIDEBAR: DUYARLILIK ANALİZİ ---
-st.sidebar.header("🧪 Stres Testi & Senaryo")
-sim_kur = st.sidebar.slider("Dolar Kuru Senaryosu (TRY)", 30.0, 50.0, 32.50)
-st.sidebar.info(f"Kur {sim_kur} TL olursa sektörün dolar bazlı büyüklüğü yeniden hesaplanacaktır.")
-
 @st.cache_data(ttl=3600)
-def get_bank_ultra_data(kur_manual):
+def get_intelligence_data():
     data = []
-    for name, info in BANKA_BILGILERI.items():
-        try:
-            t = yf.Ticker(info['ticker'])
-            h = t.history(period="10y") # Tarihi zirve için uzun çektik
-            if h.empty: continue
-            
-            fiyat = float(h['Close'].iloc[-1])
-            zirve_tl = float(h['Close'].max())
-            
-            # Lot sayıları (Öncekiyle aynı)
-            lot_sayilari = {"Akbank": 5.2, "Garanti": 4.2, "İş Bankası": 10.0, "Yapı Kredi": 8.4, "Vakıfbank": 9.9, "Halkbank": 5.0}
-            m_cap_tl = fiyat * lot_sayilari[name] * 1e9
-            
-            pb = m_cap_tl / info['ozsermaye']
-            roe = (info['ana_kar'] / info['ozsermaye']) * 100
-            uzaklik = ((zirve_tl - fiyat) / zirve_tl) * 100
+    usd_ticker = yf.Ticker("TRY=X")
+    kur = float(usd_ticker.history(period="1d")['Close'].iloc[-1])
+    
+    for name, info in BANKA_VERI.items():
+        t = yf.Ticker(info['ticker'])
+        h = t.history(period="max") # Dolar zirvesi için max veri
+        
+        fiyat = float(h['Close'].iloc[-1])
+        # Tarihi Dolar Zirvesi (Yaklaşık 2013-2014 dönemleri)
+        # Bankalar genellikle dolar bazında 2-4$ arası zirve gördüler.
+        zirve_usd = 3.5 # Ortalama tarihi zirve dolar bazlı
+        guncel_usd = fiyat / kur
+        recovery_pot = ((zirve_usd - guncel_usd) / zirve_usd) * 100
 
-            data.append({
-                "Banka": name,
-                "Grup": info['grup'],
-                "Fiyat (TL)": fiyat,
-                "Simüle Piyasa Değeri ($ B)": (m_cap_tl / kur_manual) / 1e9,
-                "PD/DD": pb,
-                "ROE (%)": roe,
-                "Zirveye Uzaklık (%)": uzaklik,
-                "Tahmini Temettü (%)": info['temettü']
-            })
-        except: continue
-    return pd.DataFrame(data)
+        # Rasyo Hesaplama
+        lot_miktari = {"Akbank": 5.2, "Garanti": 4.2, "İş Bankası": 10.0, "Yapı Kredi": 8.4, "Vakıfbank": 9.9, "Halkbank": 5.0}
+        m_cap_tl = fiyat * lot_miktari[name] * 1e9
+        pb = m_cap_tl / info['ozsermaye']
+        roe = (info['kar'] / info['ozsermaye']) * 100
 
-df = get_bank_ultra_data(sim_kur)
+        # SINYAL ALGORITMASI
+        if roe > 40 and pb < 1.0:
+            sinyal = "💎 Ucuz ve Karlı (Fırsat)"
+        elif roe < 20 and pb > 1.2:
+            sinyal = "⚠️ Pahalı ve Düşük Karlı"
+        else:
+            sinyal = "⚖️ Dengeli Değerleme"
 
-# --- GÖRSELLEŞTİRME ---
+        data.append({
+            "Banka": name,
+            "Grup": info['grup'],
+            "Fiyat (TL)": fiyat,
+            "Piyasa Değeri ($ B)": (m_cap_tl / kur) / 1e9,
+            "PD/DD": pb,
+            "ROE (%)": roe,
+            "Dolar Bazlı Zirveye Uzaklık (%)": recovery_pot,
+            "Beta (Risk Skoru)": info['beta'],
+            "Yapay Zeka Sinyali": sinyal
+        })
+    return pd.DataFrame(data), kur
+
+df, guncel_kur = get_intelligence_data()
+
+# --- ANALİZ PANELİ ---
 c1, c2 = st.columns(2)
 
 with c1:
-    st.subheader("📉 Tarihi Zirveye Uzaklık (%)")
-    # Bu grafik potansiyeli gösterir
-    fig_pot = px.bar(df.sort_values("Zirveye Uzaklık (%)"), x="Banka", y="Zirveye Uzaklık (%)", 
-                     color="Zirveye Uzaklık (%)", color_continuous_scale="Reds",
-                     title="TL Bazlı Zirveden Düşüş (İskonto Oranı)")
-    st.plotly_chart(fig_pot, use_container_width=True)
+    st.subheader("🏁 Recovery (Toparlanma) Potansiyeli")
+    # Dolar bazlı zirveye ne kadar yol var?
+    fig_rec = px.bar(df, x='Banka', y='Dolar Bazlı Zirveye Uzaklık (%)', 
+                     color='Dolar Bazlı Zirveye Uzaklık (%)', color_continuous_scale='Blues_r',
+                     title="Tarihi Dolar Zirvesine Uzaklık")
+    st.plotly_chart(fig_rec, use_container_width=True)
 
 with c2:
-    st.subheader("💰 Temettü ve Karlılık Dengesi")
-    fig_div = px.scatter(df, x="ROE (%)", y="Tahmini Temettü (%)", size="PD/DD", 
-                         color="Banka", text="Banka", title="Hem Karlı Hem Temettü Verenler")
-    st.plotly_chart(fig_div, use_container_width=True)
+    st.subheader("⚖️ Risk vs Getiri (Beta Analizi)")
+    # Beta ne kadar yüksekse piyasaya o kadar duyarlı
+    fig_beta = px.scatter(df, x='Beta (Risk Skoru)', y='ROE (%)', size='Piyasa Değeri ($ B)',
+                         color='Banka', text='Banka', title="Banka Risk Skoru vs Karlılık")
+    st.plotly_chart(fig_beta, use_container_width=True)
 
-# --- SEKTÖREL KARNE ---
+# --- SINYAL TABLOSU ---
 st.divider()
-st.subheader("📜 BankScope Stratejik Karne")
+st.subheader("🤖 Algoritmik Analiz Çıktıları")
 
-# Tabloyu özelleştirilmiş görünümle verelim
+def color_signals(val):
+    if "💎" in val: return 'background-color: #004d1a'
+    if "⚠️" in val: return 'background-color: #4d0000'
+    return ''
+
 st.dataframe(df.style.format({
     "Fiyat (TL)": "{:.2f}",
-    "Simüle Piyasa Değeri ($ B)": "{:.2f}",
+    "Piyasa Değeri ($ B)": "{:.2f}",
     "PD/DD": "{:.2f}",
     "ROE (%)": "{:.1f}%",
-    "Zirveye Uzaklık (%)": "{:.1f}%",
-    "Tahmini Temettü (%)": "{:.1f}%"
-}).highlight_min(subset=["PD/DD"], color="#2ecc71") # En ucuz olanı yeşil yak
-  .highlight_max(subset=["ROE (%)"], color="#2ecc71"), # En karlı olanı yeşil yak
-use_container_width=True)
+    "Dolar Bazlı Zirveye Uzaklık (%)": "{:.1f}%"
+}).applymap(color_signals, subset=['Yapay Zeka Sinyali']), use_container_width=True)
 
-st.caption(f"⚠️ Not: Veriler {sim_kur} TL kur senaryosuna göre simüle edilmiştir.")
+st.info("**🕵️ Müfettiş Notu:** 'Dolar Bazlı Zirveye Uzaklık', bankacılık sektörünün makroekonomik normalleşme sürecindeki 'alanını' gösterir. Beta skoru ise para politikası kararlarına karşı bankanın vereceği tepkinin şiddetini ölçer.")
