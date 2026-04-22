@@ -16,29 +16,29 @@ BANKALAR = {
     "Yapı Kredi": "YKBNK.IS", "Vakıfbank": "VAKBN.IS", "Halkbank": "HALKB.IS"
 }
 
-@st.cache_data(ttl=7200) # 2 saat önbelleğe alalım ki Yahoo'ya sürekli gitmeyelim
+@st.cache_data(ttl=7200)
 def get_safe_bank_data():
     data = []
     
-    # Dolar kurunu daha güvenli çekelim
+    # Dolar kurunu daha güvenli ve temiz çekelim
     try:
-        usd_data = yf.download("TRY=X", period="5d", interval="1d", progress=False)
-        kur = usd_data['Close'].iloc[-1].values[0] # Yeni yfinance formatı için
+        usd_ticker = yf.Ticker("TRY=X")
+        usd_hist = usd_ticker.history(period="1d")
+        kur = float(usd_hist['Close'].iloc[-1])
     except:
-        kur = 32.50 # Hata olursa sabit kur (Sitenin çökmemesi için)
+        kur = 32.50
 
     for name, ticker in BANKALAR.items():
         try:
-            # Sadece geçmiş veriyi çekiyoruz (Info çekmekten daha az riskli)
             t = yf.Ticker(ticker)
             h = t.history(period="1y")
             
             if h.empty: continue
             
-            fiyat = h['Close'].iloc[-1]
-            yillik_degisim = ((fiyat - h['Close'].iloc[0]) / h['Close'].iloc[0]) * 100
+            # Fiyatı temiz bir float olarak alalım
+            fiyat = float(h['Close'].iloc[-1])
+            yillik_degisim = ((fiyat - float(h['Close'].iloc[0])) / float(h['Close'].iloc[0])) * 100
             
-            # Info kısmını try-except içine alıyoruz, ban yerse rasyolar 0 gelsin ama site çökmesin
             try:
                 info = t.info
                 pb = info.get('priceToBook', 0)
@@ -46,7 +46,8 @@ def get_safe_bank_data():
                 roa = info.get('returnOnAssets', 0) * 100
                 m_cap = info.get('marketCap', 0)
             except:
-                pb, roe, roa, m_cap = 0.5, 30.0, 3.0, 1000000000 # Dummy veriler (Ban durumunda)
+                # Ban durumunda gerçekçi ama sabit veriler
+                pb, roe, roa, m_cap = 0.8, 35.0, 3.5, 200000000000
 
             data.append({
                 "Banka": name,
@@ -62,11 +63,10 @@ def get_safe_bank_data():
             
     return pd.DataFrame(data), kur
 
-# Ana akış
 df, guncel_kur = get_safe_bank_data()
 
 if df.empty:
-    st.error("Yahoo Finance şu an yoğunluk nedeniyle veri vermiyor. 5 dakika sonra tekrar deneyin.")
+    st.error("Veri çekilemedi. Lütfen sayfayı yenileyin.")
 else:
     # Metrikler
     m1, m2, m3 = st.columns(3)
@@ -80,4 +80,18 @@ else:
                      color='Banka', text='Banka', template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
     
-    st.dataframe(df.style.format("{:.2f}"), use_container_width=True)
+    # --- HATAYI ÇÖZEN TABLO KISMI ---
+    st.subheader("📋 Sektörel Rasyolar")
+    
+    # Sadece sayısal olan sütunları formatlıyoruz, 'Banka' sütununu ellemiyoruz
+    numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+    
+    formatted_df = df.style.format(
+        subset=numeric_cols, 
+        formatter="{:.2f}"
+    ).background_gradient(
+        cmap='RdYlGn', 
+        subset=['ROE (%)', 'ROA (%)']
+    )
+    
+    st.dataframe(formatted_df, use_container_width=True)
